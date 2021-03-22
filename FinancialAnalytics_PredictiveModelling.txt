@@ -1,0 +1,333 @@
+# -*- coding: utf-8 -*-
+"""
+Purpose: Bank Loan Credit Classification -whether to issue loan to customer or not
+Classification Predictive Modelling
+Classification of good and bad customers to issue bank loans
+Created on Mon Mar 22 00:59:54 2021
+@author: BIVentures
+"""
+import warnings
+warnings.filterwarnings('ignore')
+import os
+import pandas as pd
+from pandas import read_csv
+from collections import Counter
+from sklearn.datasets import make_classification
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.svm import SVR
+from matplotlib import pyplot
+from collections import Counter
+from numpy import mean
+from numpy import std
+from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.metrics import fbeta_score
+from sklearn.metrics import make_scorer
+from sklearn.dummy import DummyClassifier
+from sklearn.metrics import make_scorer
+from sklearn.linear_model import LogisticRegression
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.naive_bayes import GaussianNB
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import StackingClassifier
+
+
+###### Step 1: Load the Data ######
+# load the csv file as a data frame
+filename='C:/DirectoryPathHere/filename.csv.csv'
+dataframe = pd.read_csv(filename, header=None)
+
+###### Step 2: Explore the Data ######
+#display top 5 rows
+# the categorical columns are encoded with an Axxx format
+# where “x” are integers for different labels. 
+#A one-hot encoding of the categorical variables will be required
+#print(dataframe.head())
+#print('\n)
+
+#Summarize the shape of the dataset
+##Results:The class distribution is summarized
+print('Total rows: ', len(dataframe))
+print('Total rows, columns: ', dataframe.shape) #shows 1000 rows and 21 columns respectively
+print('\n')
+
+#The target variable or class is the last column and contains values of 1 and 2. 
+#These will need to be label encoded to 0 and 1, respectively.
+#This is to meet the general expectation for imbalanced binary classification tasks
+#where 0 represents the negative case and 1 represents the positive case.
+# summarize the class distribution
+target = dataframe.values[:,-1]
+counter = Counter(target)
+for k,v in counter.items():
+	per = v / len(target) * 100
+	print('Class=%d, Count=%d, Percentage=%.3f%%' % (k, v, per))    
+##Results:confirming the number of good and bad customers 
+##and the percentage of cases in the minority and majority classes
+print('\n')
+
+#Select columns with numerical data types
+#Then create histograms of each numeric input variable
+num_ix = dataframe.select_dtypes(include=['int64', 'float64']).columns
+
+#Select a subset of the dataframe with the chosen columns
+subset = dataframe[num_ix]
+
+#Visualize a histogram plot of each numeric variable
+#One histogram subplot for each of the seven input variables and one class label in the dataset.
+#The title of each subplot indicates the column number in the DataFrame, e.g. zero-offset from 0 to 20
+ax = subset.hist()
+#Disable axis labels to avoid the clutter
+for axis in ax.flatten():
+	axis.set_xticklabels([])
+	axis.set_yticklabels([])
+#Show the plot
+pyplot.show()
+
+###### Step 3: Build Model, Test/Evaluate and Check Baseline Result ######
+#k-fold cross-validation procedure provides a good general estimate of model performance.
+#k-fold outcome is not too optimistically biased, compared to a single train-test split. 
+#Using k=10, meaning each fold will contain about 1000/10 or 100 examples.
+#Predict class labels of whether a customer is good or not. 
+#Requires a measure that is appropriate for evaluating the predicted class labels.
+#Focus of the task is on the positive class (bad customers). 
+#Precision and recall are a good place to start. 
+#Maximizing precision will minimize the false positives
+#Maximizing recall will minimize the false negatives in the predictions made by a model.
+##Formula: Precision = TruePositives / (TruePositives + FalsePositives)
+##Formula: Recall = TruePositives / (TruePositives + FalseNegatives)
+#F-Measure will calculate the harmonic mean between precision and recall.
+#F-measure will summarize a model’s ability to minimize misclassification errors for the positive class. 
+#but we want to favor models that are better are minimizing false negatives over false positives.
+##Formula: F-Measure = (2 * Precision * Recall) / (Precision + Recall)
+#false negatives are more damaging than false positives.
+#false negatives on this dataset are cases of a bad customer being marked as a good customer and being given a loan
+#If Cost(False Negatives) > Cost(False Positives), then it will be costly for bank to issue loans
+
+#***Function to load the dataset and split the columns into input and output variables.
+#one-hot encodes the categorical variables and label encode the target variable. 
+#one-hot encoding replaces the categorical variable with one new column for each value of the variable 
+#and marks values with a 1 in the column for that value.
+#Split into input and output varaibles
+last_ix = len(dataframe.columns) - 1
+X, y = dataframe.drop(last_ix, axis=1), dataframe[last_ix]
+
+#Select categorical features
+cat_ix = X.select_dtypes(include=['object', 'bool']).columns
+# one hot encode cat features only
+ct = ColumnTransformer([('o',OneHotEncoder(),cat_ix)], remainder='passthrough')
+X = ct.fit_transform(X)
+
+#Label encode the target variable to have the classes 0 and 1
+y = LabelEncoder().fit_transform(y)
+#print(y) ##just testing here
+
+##***This function is puts all the above into a single clean function##
+def load_dataset(full_path):
+	# load the dataset as a numpy array
+	dataframe = read_csv(full_path, header=None)
+	# split into inputs and outputs
+	last_ix = len(dataframe.columns) - 1
+	X, y = dataframe.drop(last_ix, axis=1), dataframe[last_ix]
+	# select categorical features
+	cat_ix = X.select_dtypes(include=['object', 'bool']).columns
+	# one hot encode cat features only
+	ct = ColumnTransformer([('o',OneHotEncoder(),cat_ix)], remainder='passthrough')
+	X = ct.fit_transform(X)
+	# label encode the target variable to have the classes 0 and 1
+	y = LabelEncoder().fit_transform(y)
+	return X, y
+
+#Function to evaluate a set of predictions using the fbeta_score(). 
+#function with beta set to 2.
+#Calculate f2 score
+def f2(y_true, y_pred):
+	return fbeta_score(y_true, y_pred, beta=2)
+
+
+#Evaluate a model
+#Function will evaluate a given model on the dataset and return a list of F2-Measure scores for each fold and repeat
+def evaluate_model(X, y, model):
+	# define evaluation procedure
+	cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+	# define the model evaluation the metric
+	metric = make_scorer(f2)
+	# evaluate model
+	scores = cross_val_score(model, X, y, scoring=metric, cv=cv, n_jobs=-1)
+	return scores
+
+#Evaluate a baseline model on the dataset using this test harness
+# define the location of the dataset
+full_path = filename
+# load the dataset
+X, y = load_dataset(full_path)
+# summarize the loaded dataset
+print(X.shape, y.shape, Counter(y))
+# define the reference model
+model = DummyClassifier(strategy='constant', constant=1)
+# evaluate the model
+scores = evaluate_model(X, y, model)
+# summarize performance
+print('Mean F2: %.3f (%.3f)' % (mean(scores), std(scores)))
+print('\n')
+
+
+# create a dataset with a given class distribution
+from numpy import hstack
+from numpy import vstack
+from numpy import where
+from sklearn.datasets import make_blobs
+def get_dataset(dataframe):
+	# determine the number of classes
+	n_classes = len(dataframe)
+	# determine the number of examples to generate for each class
+	largest = max([v for k,v in dataframe.items()])
+	n_samples = largest * n_classes
+	# create dataset
+	X, y = make_blobs(n_samples=n_samples, centers=n_classes, n_features=2, random_state=1, cluster_std=3)
+	# collect the examples
+	X_list, y_list = list(), list()
+	for k,v in dataframe.items():
+		row_ix = where(y == k)[0]
+		selected = row_ix[:v]
+		X_list.append(X[selected, :])
+		y_list.append(y[selected])
+	return vstack(X_list), hstack(y_list)
+
+
+# evaluate a model using repeated k-fold cross-validation
+def evaluate_model(X, y, metric):
+	# define model
+	model = DummyClassifier(strategy='most_frequent')
+	# evaluate a model with repeated stratified k fold cv
+	cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+	scores = cross_val_score(model, X, y, scoring=metric, cv=cv, n_jobs=-1)
+	return scores
+ 
+# define the class distribution 1:100
+dataframe = {0:10000, 1:1000}
+# generate dataset
+X, y = get_dataset(dataframe)
+# summarize class distribution:
+major = (len(where(y == 0)[0]) / len(X)) * 100
+minor = (len(where(y == 1)[0]) / len(X)) * 100
+print('Class 0: %.3f%%, Class 1: %.3f%%' % (major, minor))
+# evaluate model
+scores = evaluate_model(X, y, 'accuracy')
+# report score
+print('Accuracy: %.3f%%' % (mean(scores) * 100))
+print('\n')
+
+print('##########################################################')
+
+# get the dataset
+def get_dataset2():
+    dataframe = read_csv(full_path, header=None)
+    last_ix = len(dataframe.columns) - 1
+    X, y = dataframe.drop(last_ix, axis=1), dataframe[last_ix]
+    ct = ColumnTransformer([('o',OneHotEncoder(),cat_ix)], remainder='passthrough')
+    X1 = ct.fit_transform(X)
+    y1 = LabelEncoder().fit_transform(y)
+    X1, y1 = make_classification(n_samples=1000, n_features=21, n_informative=15, n_redundant=5, random_state=1)
+    return X1, y1
+
+
+# get a stacking ensemble of models
+def get_stacking():
+	# define the base models
+	level0 = list()
+	level0.append(('LogisticRegression(lr)', LogisticRegression()))
+	level0.append(('KNeighborsClassifier(knn)', KNeighborsClassifier()))
+	level0.append(('DecisionTreeClassifier(cart)', DecisionTreeClassifier()))
+	level0.append(('Svm', SVC()))
+	level0.append(('Naivebayes', GaussianNB()))
+	# define meta learner model
+	level1 = LogisticRegression()
+	# define the stacking ensemble
+	model = StackingClassifier(estimators=level0, final_estimator=level1, cv=5)
+	return model
+	# define the base models
+	level0 = list()
+	level0.append(('lr', LogisticRegression()))
+	level0.append(('knn', KNeighborsClassifier()))
+	level0.append(('cart', DecisionTreeClassifier()))
+	level0.append(('svm', SVC()))
+	level0.append(('bayes', GaussianNB()))
+	# define meta learner model
+	level1 = LogisticRegression()
+	# define the stacking ensemble
+	model = StackingClassifier(estimators=level0, final_estimator=level1, cv=5)
+	return model
+ 
+# get a list of models to evaluate
+def get_models():
+	models = dict()
+	models['LogisticRegression(lr)'] = LogisticRegression()
+	models['KNeighborsClassifier(knn)'] = KNeighborsClassifier()
+	models['DecisionTreeClassifier(cart)'] = DecisionTreeClassifier()
+	models['Svm'] = SVC()
+	models['Naivebayes'] = GaussianNB()
+	models['stacking'] = get_stacking()
+	return models
+ 
+# evaluate a give model using cross-validation
+def evaluate_model(model, X, y):
+	cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+	scores = cross_val_score(model, X, y, scoring='accuracy', cv=cv, n_jobs=-1, error_score='raise')
+	return scores
+ 
+# define dataset
+X, y = get_dataset2()
+# get the models to evaluate
+models = get_models()
+# evaluate the models and store results
+results, names = list(), list()
+for name, model in models.items():
+	scores = evaluate_model(model, X, y)
+	results.append(scores)
+	names.append(name)
+	print('>%s %.3f (%.3f)' % (name, mean(scores), std(scores)))
+# plot model performance for comparison
+pyplot.boxplot(results, labels=names, showmeans=True)
+pyplot.show()
+
+
+# define an imbalanced dataset with a 1:100 class ratio
+from numpy import unique
+from numpy import hstack
+from numpy import vstack
+from numpy import where
+from matplotlib import pyplot
+from sklearn.datasets import make_blobs
+# scatter plot of dataset, different color for each class
+def plot_dataset(X, y):
+	# create scatter plot for samples from each class
+	n_classes = len(unique(y))
+	for class_value in range(n_classes):
+		# get row indexes for samples with this class
+		row_ix = where(y == class_value)[0]
+		# create scatter of these samples
+		pyplot.scatter(X[row_ix, 0], X[row_ix, 1], label=str(class_value))
+	# show a legend
+	pyplot.legend()
+	# show the plot
+	pyplot.show()
+
+# define the class distribution 1:100
+dataframe = {0:10000, 1:1000}
+# generate dataset
+X, y = get_dataset(dataframe)
+# summarize class distribution:
+major = (len(where(y == 0)[0]) / len(X)) * 100
+minor = (len(where(y == 1)[0]) / len(X)) * 100
+print('\n')
+print('Major: Class (0): %.3f%%, Minor: Class (1): %.3f%%' % (major, minor))
+# plot dataset
+plot_dataset(X, y)
